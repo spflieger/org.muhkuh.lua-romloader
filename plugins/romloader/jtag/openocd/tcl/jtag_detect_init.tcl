@@ -147,6 +147,12 @@ proc setup_interface_jtagkey {strLocation} {
 	ftdi_layout_signal nSRST -data 0x0200 -noe 0x0800
 }
 
+proc setup_interface_jlink {} {
+	interface jlink
+	transport select jtag
+	adapter_khz 1000
+}
+
 # Configure an interface.
 proc setup_interface {strInterfaceID strLocation} {
 	echo "+setup_interface $strInterfaceID $strLocation"
@@ -164,6 +170,7 @@ proc setup_interface {strInterfaceID strLocation} {
 	} elseif {$strInterfaceID == "NXHX_90-DRIVE"}         {setup_interface_nxhx90_drive $strLocation
 	} elseif {$strInterfaceID == "NXJTAG-4000-USB"}       {setup_interface_nxjtag_4000_usb $strLocation
 	} elseif {$strInterfaceID == "NRPEB_H90-RE"}          {setup_interface_nrpeb_h90_re $strLocation
+	} elseif {$strInterfaceID == "J-Link"}                {setup_interface_jlink
 	}
 
 	echo "-setup_interface $strInterfaceID"

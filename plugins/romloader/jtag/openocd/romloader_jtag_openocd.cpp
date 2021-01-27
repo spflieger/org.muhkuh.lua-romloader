@@ -649,7 +649,7 @@ int romloader_jtag_openocd::initialize(void)
 
 /* FIXME: read this from some kind of configuration file. */
 
-const romloader_jtag_openocd::INTERFACE_SETUP_STRUCT_T romloader_jtag_openocd::atInterfaceCfg[8] =
+const romloader_jtag_openocd::INTERFACE_SETUP_STRUCT_T romloader_jtag_openocd::atInterfaceCfg[10] =
 {
 	{"NXJTAG-USB",             "setup_interface NXJTAG-USB %s",            "probe_interface", 0x1939, 0x0023 },
 	{"Amontec_JTAGkey",        "setup_interface Amontec_JTAGkey %s",       "probe_interface", 0x0403, 0xcff8 },
@@ -659,6 +659,8 @@ const romloader_jtag_openocd::INTERFACE_SETUP_STRUCT_T romloader_jtag_openocd::a
 	{"NXHX_90-DRIVE",          "setup_interface NXHX_90-DRIVE %s",         "probe_interface", 0x1939, 0x0031 },
 	{"NRPEB_H90-RE",           "setup_interface NRPEB_H90-RE %s",          "probe_interface", 0x1939, 0x0029 },
 	{"NXJTAG-4000-USB",        "setup_interface NXJTAG-4000-USB %s",       "probe_interface", 0x1939, 0x0301 },
+	{"J-Link",                 "setup_interface J-Link %s",                "probe_interface", 0x1366, 0x0101 },
+	{"J-Link",                 "setup_interface J-Link %s",                "probe_interface", 0x1366, 0x0105 },
 };
 
 
