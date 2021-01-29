@@ -1,6 +1,7 @@
 #! /usr/bin/python2.7
 
 from jonchki import cli_args
+from jonchki import install
 from jonchki import jonchkihere
 from jonchki import vcs_id
 
@@ -56,7 +57,8 @@ strCfg_jonchkiHerePath = os.path.join(
     'jonchki'
 )
 # This is the Jonchki version to use.
-strCfg_jonchkiVersion = '0.0.4.1'
+strCfg_jonchkiVersion = '0.0.5.1'
+
 # Look in this folder for Jonchki archives before downloading them.
 strCfg_jonchkiLocalArchives = os.path.join(
     strCfg_projectFolder,
@@ -89,8 +91,6 @@ strCfg_jonchkiProjectConfiguration = os.path.join(
 # -
 # --------------------------------------------------------------------------
 
-print(tPlatform)
-
 astrCMAKE_COMPILER = None
 astrCMAKE_PLATFORM = None
 astrJONCHKI_SYSTEM = None
@@ -100,70 +100,53 @@ astrEnv = None
 if tPlatform['host_distribution_id'] == 'ubuntu':
     if tPlatform['distribution_id'] == 'ubuntu':
         # Build on linux for linux.
-        # It is currently not possible to build for another version or CPU
-        # architecture.
-        if(
-            (tPlatform['distribution_version'] != tPlatform['host_distribution_version']) or
-            (tPlatform['cpu_architecture'] != tPlatform['host_cpu_architecture'])
-        ):
-            raise Exception('The target Ubuntu platform must match the build host.')
+        # It is currently not possible to build for another version of the OS.
+        if tPlatform['distribution_version'] != tPlatform['host_distribution_version']:
+            raise Exception('The target Ubuntu version must match the build host.')
 
-        # Check for all system dependencies.
-        astrDeb = [
-            'libudev-dev'
-        ]
-        astrInstall = []
-        for strDeb in astrDeb:
-            strDpkgStatus = subprocess.check_output("dpkg-query -W -f='${Status}' %s || echo 'unknown'" % strDeb, shell=True)
-            print('Check for %s = %s' % (strDeb, strDpkgStatus))
-            if strDpkgStatus != 'install ok installed':
-                astrInstall.append(strDeb)
-        if len(astrInstall) != 0:
-            subprocess.check_call('sudo apt-get update --assume-yes', shell=True)
-            subprocess.check_call('sudo apt-get install --assume-yes %s' % ' '.join(astrInstall), shell=True)
+        if tPlatform['cpu_architecture'] == tPlatform['host_cpu_architecture']:
+            # Build for the build host.
 
-        astrCMAKE_COMPILER = []
-        astrCMAKE_PLATFORM = []
-        astrJONCHKI_SYSTEM = []
-        strMake = 'make'
-
-    elif tPlatform['distribution_id'] == 'raspberry':
-        # Build on linux for raspebrry.
-        if tPlatform['cpu_architecture'] == 'arm64':
-            # Create the folder if it does not exist yet.
-            # Create the folders if they do not exist yet.
-            astrFolders = [
-                strCfg_workingFolder,
-                os.path.join(strCfg_workingFolder, 'packages'),
+            astrDeb = [
+                'libudev-dev'
             ]
-            for strPath in astrFolders:
-                if os.path.exists(strPath) is not True:
-                    os.makedirs(strPath)
+            install.install_host_debs(astrDeb)
 
-            packagesPath = os.path.join(strCfg_workingFolder, 'packages')
-            os.chdir(packagesPath)
-            subProcessPath = os.path.join(strCfg_projectFolder, 'cmake', 'tools')
-            subProcessCall = '%s/get_dependencies.sh libudev-dev:arm64' % subProcessPath
-            print(subProcessCall)
-            subprocess.check_call(subProcessCall, shell=True)
-            os.chdir(strCfg_workingFolder)
+            astrCMAKE_COMPILER = []
+            astrCMAKE_PLATFORM = []
+            astrJONCHKI_SYSTEM = []
+            strMake = 'make'
+
+        elif tPlatform['cpu_architecture'] == 'arm64':
+            # Build on linux for raspebrry.
+
+            astrDeb = [
+                'libudev-dev:arm64'
+            ]
+            install.install_foreign_debs(astrDeb, strCfg_workingFolder, strCfg_projectFolder)
+
             astrCMAKE_COMPILER = [
                 '-DCMAKE_TOOLCHAIN_FILE=%s/cmake/toolchainfiles/toolchain_ubuntu_arm64.cmake' % strCfg_projectFolder
             ]
             astrCMAKE_PLATFORM = [
-                '-DJONCHKI_PLATFORM_DIST_ID=ubuntu',
-                '-DJONCHKI_PLATFORM_DIST_VERSION=18.04',
-                '-DJONCHKI_PLATFORM_CPU_ARCH=arm64'
+                '-DJONCHKI_PLATFORM_DIST_ID=%s' % tPlatform['distribution_id'],
+                '-DJONCHKI_PLATFORM_DIST_VERSION=%s' % tPlatform['distribution_version'],
+                '-DJONCHKI_PLATFORM_CPU_ARCH=%s' % tPlatform['cpu_architecture']
             ]
+
             astrJONCHKI_SYSTEM = [
-                '--distribution-id ubuntu',
-                '--distribution-version 18.04',
-                '--cpu-architecture arm64'
+                '--distribution-id %s' % tPlatform['distribution_id'],
+                '--distribution-version %s' % tPlatform['distribution_version'],
+                '--cpu-architecture %s' % tPlatform['cpu_architecture']
             ]
             strMake = 'make'
 
+        else:
+            raise Exception('Unknown CPU architecture: "%s"' % tPlatform['cpu_architecture'])
+
     elif tPlatform['distribution_id'] == 'windows':
         # Cross build on linux for windows.
+
         if tPlatform['cpu_architecture'] == 'x86':
             # Build for 32bit windows.
             astrCMAKE_COMPILER = [
@@ -317,7 +300,8 @@ print(strProjectVersionVcs, strProjectVersionVcsLong)
 astrCmd = [
     'cmake',
     '-DCMAKE_INSTALL_PREFIX=""',
-    '-DPRJ_DIR=%s' % strCfg_projectFolder
+    '-DPRJ_DIR=%s' % strCfg_projectFolder,
+    '-DWORKING_DIR=%s' % strCfg_workingFolder
 ]
 astrCmd.extend(astrCMAKE_COMPILER)
 astrCmd.append(os.path.join(strCfg_projectFolder, 'external'))
@@ -336,6 +320,7 @@ astrCmd = [
     'cmake',
     '-DCMAKE_INSTALL_PREFIX=""',
     '-DPRJ_DIR=%s' % strCfg_projectFolder,
+    '-DWORKING_DIR=%s' % strCfg_workingFolder,
     '-DBUILDCFG_ONLY_JONCHKI_CFG="ON"',
     '-DBUILDCFG_LUA_USE_SYSTEM="OFF"',
     '-DBUILDCFG_LUA_VERSION="5.1"'
@@ -371,6 +356,7 @@ astrCmd = [
     'cmake',
     '-DCMAKE_INSTALL_PREFIX=""',
     '-DPRJ_DIR=%s' % strCfg_projectFolder,
+    '-DWORKING_DIR=%s' % strCfg_workingFolder,
     '-DBUILDCFG_LUA_USE_SYSTEM="OFF"',
     '-DBUILDCFG_LUA_VERSION="5.1"'
 ]
@@ -392,6 +378,7 @@ astrCmd = [
     'cmake',
     '-DCMAKE_INSTALL_PREFIX=""',
     '-DPRJ_DIR=%s' % strCfg_projectFolder,
+    '-DWORKING_DIR=%s' % strCfg_workingFolder,
     '-DBUILDCFG_ONLY_JONCHKI_CFG="ON"',
     '-DBUILDCFG_LUA_USE_SYSTEM="OFF"',
     '-DBUILDCFG_LUA_VERSION="5.4"'
@@ -428,6 +415,7 @@ astrCmd = [
     'cmake',
     '-DCMAKE_INSTALL_PREFIX=""',
     '-DPRJ_DIR=%s' % strCfg_projectFolder,
+    '-DWORKING_DIR=%s' % strCfg_workingFolder,
     '-DBUILDCFG_LUA_USE_SYSTEM="OFF"',
     '-DBUILDCFG_LUA_VERSION="5.4"'
 ]
