@@ -25,17 +25,21 @@ import os
 import platform
 import re
 import shutil
-import string
 import subprocess
 import sys
 import tarfile
 import tempfile
 import time
-import urllib2
 import zipfile
 
+try:
+    from urllib.request import urlopen
+    from urllib.error import HTTPError
+except ImportError:
+    from urllib2 import urlopen, HTTPError
 
-strDefaultJonchkiVersion = '0.0.3.1'
+
+strDefaultJonchkiVersion = '0.0.6.1'
 
 
 class ProgressOutput:
@@ -101,7 +105,7 @@ class ProgressOutput:
 
             # Get the end position of the line in bytes.
             sizLineEnd = self.m_uiLinePositionStart
-            sizLineEnd += self.m_uiDotsPerLine * self.m_sizDot
+            sizLineEnd += int((self.m_uiDotsPerLine * self.m_sizDot) + 0.5)
             sizDownloaded = self.m_sizCurrent + sizData
             if sizLineEnd > sizDownloaded:
                 sizLineEnd = sizDownloaded
@@ -110,7 +114,7 @@ class ProgressOutput:
             # Get the number of bytes in this line.
             sizDotBytes = sizLineEnd - self.m_uiLinePositionStart
             # Get the number of new dots in this line.
-            sizDots = int(sizDotBytes / self.m_sizDot)
+            sizDots = int((sizDotBytes / self.m_sizDot) + 0.5)
             sizDots -= self.m_uiDotsPrintedInCurrentLine
             # Print the new dots.
             sys.stdout.write('.' * sizDots)
@@ -137,7 +141,7 @@ class ProgressOutput:
         # Flush the output stream.
         tLastFlush = time.time() - self.m_tTimeLastFlushTime
         if tLastFlush >= self.m_tTimeMinimumFlushIntervall:
-                sys.stdout.flush()
+            sys.stdout.flush()
 
     def finish(self):
         if self.m_uiDotsPrintedInCurrentLine is not None:
@@ -150,6 +154,7 @@ class PlatformDetect:
         self.strHostCpuArchitecture = None
         self.strHostDistributionId = None
         self.strHostDistributionVersion = None
+        self.strHostDistributionLike = None
         self.strStandardArchiveFormat = None
 
     def __windows_get_cpu_architecture_env(self):
@@ -157,13 +162,13 @@ class PlatformDetect:
         strEnvProcessorArchitecture = None
         strEnvProcessorArchiteW6432 = None
         if 'PROCESSOR_ARCHITECTURE' in os.environ:
-            strEnvProcessorArchitecture = string.lower(
-                os.environ['PROCESSOR_ARCHITECTURE']
-            )
+            strEnvProcessorArchitecture = os.environ[
+                'PROCESSOR_ARCHITECTURE'
+            ].lower()
         if 'PROCESSOR_ARCHITEW6432' in os.environ:
-            strEnvProcessorArchiteW6432 = string.lower(
-                os.environ['PROCESSOR_ARCHITEW6432']
-            )
+            strEnvProcessorArchiteW6432 = os.environ[
+                'PROCESSOR_ARCHITEW6432'
+            ].lower()
         # See here for details: https://blogs.msdn.microsoft.com/david.wang/
         # 2006/03/27/howto-detect-process-bitness/
         if((strEnvProcessorArchitecture == 'amd64') or
@@ -187,7 +192,7 @@ class PlatformDetect:
 
         # Try to parse the output of the 'getconf LONG_BIT' command.
         strOutput = subprocess.check_output(['getconf', 'LONG_BIT'])
-        strOutputStrip = string.strip(strOutput)
+        strOutputStrip = strOutput.strip()
         if strOutputStrip == '32':
             strCpuArchitecture = 'x86'
         elif strOutputStrip == '64':
@@ -205,8 +210,11 @@ class PlatformDetect:
         }
 
         # Try to parse the output of the 'lscpu' command.
-        strOutput = subprocess.check_output(['lscpu'])
-        tMatch = re.search('Architecture: *(\S+)', strOutput)
+        strOutput = subprocess.check_output(['lscpu']).decode(
+            "utf-8",
+            "replace"
+        )
+        tMatch = re.search(r'Architecture: *(\S+)', strOutput)
         if tMatch is None:
             raise Exception('Failed to get the CPU architecture with "lscpu".')
 
@@ -216,6 +224,37 @@ class PlatformDetect:
             strCpuArchitecture = astrReplacements[strCpuArchitecture]
 
         return strCpuArchitecture
+
+    def __linux_detect_distribution_etc_os_release(self):
+        strDistributionId = None
+        strDistributionVersion = None
+        strDistributionLike = None
+        print("__linux_detect_distribution_etc_os_release")
+        # Try to open /etc/os-release.
+        try:
+            tFile = open('/etc/os-release', 'rt')
+        except:
+            raise
+
+        for strLine in tFile:
+            print(strLine)
+            tMatch = re.match(r'ID=(.+)', strLine)
+            if tMatch is not None:
+                strDistributionId = tMatch.group(1).lower()
+            tMatch = re.match(r'VERSION_ID=(.+)', strLine)
+            if tMatch is not None:
+                strDistributionVersion = tMatch.group(1).strip('"')
+            tMatch = re.match(r'ID_LIKE=(.+)', strLine)
+            if tMatch is not None:
+                strDistributionLike = tMatch.group(1).strip('"')
+        tFile.close()
+
+        # Return both components or none.
+        if (strDistributionId is None) or (strDistributionVersion is None):
+            strDistributionId = None
+            strDistributionVersion = None
+
+        return strDistributionId, strDistributionVersion, strDistributionLike
 
     def __linux_detect_distribution_etc_lsb_release(self):
         strDistributionId = None
@@ -227,10 +266,10 @@ class PlatformDetect:
             raise Exception('Failed to detect the Linux distribution with '
                             '/etc/lsb-release.')
         for strLine in tFile:
-            tMatch = re.match('DISTRIB_ID=(.+)', strLine)
+            tMatch = re.match(r'DISTRIB_ID=(.+)', strLine)
             if tMatch is not None:
-                strDistributionId = string.lower(tMatch.group(1))
-            tMatch = re.match('DISTRIB_RELEASE=(.+)', strLine)
+                strDistributionId = tMatch.group(1).lower()
+            tMatch = re.match(r'DISTRIB_RELEASE=(.+)', strLine)
             if tMatch is not None:
                 strDistributionVersion = tMatch.group(1)
         tFile.close()
@@ -270,8 +309,14 @@ class PlatformDetect:
             self.strHostCpuArchitecture = strCpuArch
 
             # Detect the distribution.
-            self.strHostDistributionId, self.strHostDistributionVersion =\
-                self.__linux_detect_distribution_etc_lsb_release()
+            try:
+                self.strHostDistributionId, self.strHostDistributionVersion, self.strHostDistributionLike = self.__linux_detect_distribution_etc_os_release()
+            except:
+                self.strHostDistributionId, self.strHostDistributionVersion =\
+                    self.__linux_detect_distribution_etc_lsb_release()
+
+            if self.strHostDistributionLike.find('ubuntu') <= 0:
+                self.strHostDistributionId = 'ubuntu'
 
             # Linux uses TAR GZIP as standard archive format.
             self.strStandardArchiveFormat = 'tar.gz'
@@ -290,7 +335,7 @@ def download_to_file(strUrl, tFile):
     sizDownloaded = 0
 
     try:
-        aSocket = urllib2.urlopen(strUrl)
+        aSocket = urlopen(strUrl)
         aInfo = aSocket.info()
         try:
             sizTotal = int(aInfo['content-length'])
@@ -309,7 +354,7 @@ def download_to_file(strUrl, tFile):
 
         tProgress.finish()
         bResult = True
-    except urllib2.HTTPError as e:
+    except HTTPError as e:
         print('Failed to download %s: %d' % (strUrl, e.code))
 
     if fOutput:
@@ -342,17 +387,17 @@ def __check_jonchki_version(
                     astrCmd.append(strLua)
                 astrCmd.append(strTool)
                 astrCmd.append('--version')
-                strOutput = string.strip(subprocess.check_output(
+                strOutput = subprocess.check_output(
                     astrCmd,
                     shell=False
-                ))
+                ).decode("utf-8", "replace").strip()
                 logging.debug('The %s tool reported the version string "%s".' %
                               (strID, strOutput))
             except subprocess.CalledProcessError:
                 logging.debug('Failed to get the version from the %s tool.' %
                               strID)
                 strOutput = ''
-            tMatch = re.match('jonchki V(\d+.\d+.\d+.\d+)', strOutput)
+            tMatch = re.match(r'jonchki V(\d+.\d+.\d+.\d+)', strOutput)
             if tMatch is None:
                 logging.debug('Failed to extract the version '
                               'from the %s output.' % strID)

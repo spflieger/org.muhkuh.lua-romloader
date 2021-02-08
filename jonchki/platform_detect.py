@@ -10,6 +10,7 @@ class PlatformDetect:
         self.strHostCpuArchitecture = None
         self.strHostDistributionId = None
         self.strHostDistributionVersion = None
+        self.strHostDistributionLike = None
         self.strStandardArchiveFormat = None
 
     def __windows_get_cpu_architecture_env(self):
@@ -47,7 +48,7 @@ class PlatformDetect:
 
         # Try to parse the output of the 'getconf LONG_BIT' command.
         strOutput = subprocess.check_output(['getconf', 'LONG_BIT'])
-        strOutputStrip = string.strip(strOutput)
+        strOutputStrip = strOutput.strip()
         if strOutputStrip == '32':
             strCpuArchitecture = 'x86'
         elif strOutputStrip == '64':
@@ -65,8 +66,11 @@ class PlatformDetect:
         }
 
         # Try to parse the output of the 'lscpu' command.
-        strOutput = subprocess.check_output(['lscpu'])
-        tMatch = re.search('Architecture: *(\S+)', strOutput)
+        strOutput = subprocess.check_output(['lscpu']).decode(
+            "utf-8",
+            "replace"
+        )
+        tMatch = re.search(r'Architecture: *(\S+)', strOutput)
         if tMatch is None:
             raise Exception('Failed to get the CPU architecture with "lscpu".')
 
@@ -76,6 +80,36 @@ class PlatformDetect:
             strCpuArchitecture = astrReplacements[strCpuArchitecture]
 
         return strCpuArchitecture
+
+    def __linux_detect_distribution_etc_os_release(self):
+        strDistributionId = None
+        strDistributionVersion = None
+        strDistributionLike = None
+
+        # Try to open /etc/os-release.
+        try:
+            tFile = open('/etc/os-release', 'rt')
+        except:
+            raise
+
+        for strLine in tFile:
+            tMatch = re.match('ID=(.+)', strLine)
+            if tMatch is not None:
+                strDistributionId = tMatch.group(1).lower()
+            tMatch = re.match('VERSION_ID=(.+)', strLine)
+            if tMatch is not None:
+                strDistributionVersion = tMatch.group(1).strip('"')
+            tMatch = re.match('ID_LIKE=(.+)', strLine)
+            if tMatch is not None:
+                strDistributionLike = tMatch.group(1).strip('"')
+        tFile.close()
+
+        # Return both components or none.
+        if (strDistributionId is None) or (strDistributionVersion is None):
+            strDistributionId = None
+            strDistributionVersion = None
+
+        return strDistributionId, strDistributionVersion, strDistributionLike
 
     def __linux_detect_distribution_etc_lsb_release(self):
         strDistributionId = None
@@ -89,7 +123,7 @@ class PlatformDetect:
         for strLine in tFile:
             tMatch = re.match('DISTRIB_ID=(.+)', strLine)
             if tMatch is not None:
-                strDistributionId = string.lower(tMatch.group(1))
+                strDistributionId = tMatch.group(1).lower()
             tMatch = re.match('DISTRIB_RELEASE=(.+)', strLine)
             if tMatch is not None:
                 strDistributionVersion = tMatch.group(1)
@@ -130,8 +164,15 @@ class PlatformDetect:
             self.strHostCpuArchitecture = strCpuArch
 
             # Detect the distribution.
-            self.strHostDistributionId, self.strHostDistributionVersion =\
-                self.__linux_detect_distribution_etc_lsb_release()
+            try:
+                self.strHostDistributionId, self.strHostDistributionVersion, self.strHostDistributionLike = self.__linux_detect_distribution_etc_os_release()
+            except:
+                self.strHostDistributionId, self.strHostDistributionVersion =\
+                    self.__linux_detect_distribution_etc_lsb_release()
+
+            if self.strHostDistributionLike.find('ubuntu') <= 0:
+                print(self.strHostDistributionLike)
+                self.strHostDistributionId = 'ubuntu'
 
             # Linux uses TAR GZIP as standard archive format.
             self.strStandardArchiveFormat = 'tar.gz'
